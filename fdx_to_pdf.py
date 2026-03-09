@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -33,13 +34,17 @@ RIGHT_MARGIN = 1.0 * PT_PER_IN
 
 FONT_NAME = "Courier"
 FONT_SIZE = 12
-LINE_HEIGHT = 12  # 12pt leading for screenplay-like layout
-PARA_SPACING = 0  # Screenplays usually rely on line spacing, not extra paragraph gap
+LINE_HEIGHT = 12
+PARA_SPACING = 0
 
-# Absolute x positions from LEFT page edge (inches), per prompt
+# Absolute x positions from LEFT page edge (inches)
 X_CHARACTER = 3.7 * PT_PER_IN
 X_DIALOGUE = 2.5 * PT_PER_IN
 X_PAREN = 3.0 * PT_PER_IN
+
+# Scene numbers on both sides of scene headings
+X_SCENE_NUM_LEFT = 0.95 * PT_PER_IN
+X_SCENE_NUM_RIGHT = PAGE_W - 0.95 * PT_PER_IN
 
 RIGHT_TEXT_EDGE = PAGE_W - RIGHT_MARGIN
 
@@ -69,20 +74,12 @@ def normalize_type(raw_type: Optional[str]) -> str:
 
 
 def collect_text(paragraph_el: ET.Element) -> str:
-    """Collect paragraph text in source order, preserving internal spacing/newlines.
-
-    Important: we do NOT collapse whitespace globally.
-    """
     chunks: List[str] = []
-
-    # FDX typically stores visible content in <Text> nodes under <Paragraph>.
     for text_el in paragraph_el.findall("Text"):
         chunks.append(text_el.text or "")
 
-    # If no Text nodes exist, fall back to element text content.
     if not chunks:
-        fallback = "".join(paragraph_el.itertext())
-        return fallback
+        return "".join(paragraph_el.itertext())
 
     return "".join(chunks)
 
@@ -95,22 +92,18 @@ def parse_fdx(path: Path) -> List[Paragraph]:
 
     root = tree.getroot()
 
-    # Preserve sequential order from screenplay content area.
     content_paras = root.findall(".//Content/Paragraph")
     para_nodes = content_paras if content_paras else root.findall(".//Paragraph")
 
     paragraphs: List[Paragraph] = []
     for p in para_nodes:
-        ptype = normalize_type(p.attrib.get("Type"))
-        scene_number = p.attrib.get("Number")
-        text = collect_text(p)
-
-        # Keep intentionally blank lines only where meaningful in screenplay flow.
-        # We preserve empty lines if the paragraph type suggests structure.
-        if text is None:
-            text = ""
-
-        paragraphs.append(Paragraph(ptype=ptype, text=text, scene_number=scene_number))
+        paragraphs.append(
+            Paragraph(
+                ptype=normalize_type(p.attrib.get("Type")),
+                text=collect_text(p) or "",
+                scene_number=p.attrib.get("Number"),
+            )
+        )
 
     if not paragraphs:
         raise ValueError("No Paragraph elements found in the FDX file.")
@@ -119,43 +112,48 @@ def parse_fdx(path: Path) -> List[Paragraph]:
 
 
 def split_preserve_manual_lines(text: str) -> List[str]:
-    # Preserve author-entered line breaks.
     return text.splitlines() if "\n" in text or "\r" in text else [text]
+
+
+def tokenize_preserve_spaces(line: str) -> List[str]:
+    # keep spaces as tokens so we don't collapse user formatting
+    return re.findall(r"\S+|\s+", line)
 
 
 def wrap_line_to_width(raw_line: str, max_width: float, font_name: str, font_size: int) -> List[str]:
     if raw_line == "":
         return [""]
 
-    words = raw_line.split(" ")
+    tokens = tokenize_preserve_spaces(raw_line)
     lines: List[str] = []
     cur = ""
 
     def width(s: str) -> float:
         return stringWidth(s, font_name, font_size)
 
-    for w in words:
-        trial = w if cur == "" else f"{cur} {w}"
-        if width(trial) <= max_width:
+    for t in tokens:
+        trial = cur + t
+        if width(trial) <= max_width or cur == "":
             cur = trial
             continue
 
-        if cur:
-            lines.append(cur)
-            cur = w
-        else:
-            # Single overlong token: hard-break by characters.
-            token = w
-            while token and width(token) > max_width:
+        # start new line when token does not fit
+        lines.append(cur.rstrip())
+        cur = t.lstrip() if t.isspace() else t
+
+        # hard-break very long non-space tokens
+        if not t.isspace() and width(cur) > max_width:
+            token = cur
+            cur = ""
+            while token:
                 cut = len(token)
                 while cut > 1 and width(token[:cut]) > max_width:
                     cut -= 1
                 lines.append(token[:cut])
                 token = token[cut:]
-            cur = token
 
     if cur or not lines:
-        lines.append(cur)
+        lines.append(cur.rstrip())
 
     return lines
 
@@ -168,55 +166,43 @@ def wrap_paragraph_text(text: str, max_width: float, font_name: str, font_size: 
 
 
 def paragraph_style(p: Paragraph):
-    """Return (x, max_width, transform_text_fn, align_right)"""
-
     def identity(s: str) -> str:
         return s
 
     t = p.ptype
 
     if t == "scene heading":
-        x = LEFT_MARGIN
-        max_w = PAGE_W - LEFT_MARGIN - RIGHT_MARGIN
-        return x, max_w, lambda s: s.upper(), False
-
+        return LEFT_MARGIN, PAGE_W - LEFT_MARGIN - RIGHT_MARGIN, lambda s: s.upper(), False
     if t == "character":
-        x = X_CHARACTER
-        max_w = RIGHT_TEXT_EDGE - x
-        return x, max_w, lambda s: s.upper(), False
-
+        return X_CHARACTER, RIGHT_TEXT_EDGE - X_CHARACTER, lambda s: s.upper(), False
     if t == "dialogue":
-        x = X_DIALOGUE
-        max_w = RIGHT_TEXT_EDGE - x
-        return x, max_w, identity, False
-
+        return X_DIALOGUE, RIGHT_TEXT_EDGE - X_DIALOGUE, identity, False
     if t == "parenthetical":
-        x = X_PAREN
-        max_w = RIGHT_TEXT_EDGE - x
-        return x, max_w, identity, False
-
+        return X_PAREN, RIGHT_TEXT_EDGE - X_PAREN, identity, False
     if t == "transition":
-        x = LEFT_MARGIN
-        max_w = PAGE_W - LEFT_MARGIN - RIGHT_MARGIN
-        return x, max_w, lambda s: s.upper(), True
-
+        return LEFT_MARGIN, PAGE_W - LEFT_MARGIN - RIGHT_MARGIN, lambda s: s.upper(), True
     if t == "shot":
-        x = LEFT_MARGIN
-        max_w = PAGE_W - LEFT_MARGIN - RIGHT_MARGIN
-        return x, max_w, lambda s: s.upper(), False
+        return LEFT_MARGIN, PAGE_W - LEFT_MARGIN - RIGHT_MARGIN, lambda s: s.upper(), False
 
-    # action, general, unknown
-    x = LEFT_MARGIN
-    max_w = PAGE_W - LEFT_MARGIN - RIGHT_MARGIN
-    return x, max_w, identity, False
+    return LEFT_MARGIN, PAGE_W - LEFT_MARGIN - RIGHT_MARGIN, identity, False
 
 
 def draw_page_number(c: canvas.Canvas, page_num: int) -> None:
     c.setFont(FONT_NAME, FONT_SIZE)
-    page_label = f"{page_num}."
-    x = RIGHT_TEXT_EDGE - stringWidth(page_label, FONT_NAME, FONT_SIZE)
+    label = f"{page_num}."
+    x = RIGHT_TEXT_EDGE - stringWidth(label, FONT_NAME, FONT_SIZE)
     y = PAGE_H - TOP_MARGIN + 18
-    c.drawString(x, y, page_label)
+    c.drawString(x, y, label)
+
+
+def draw_scene_numbers(c: canvas.Canvas, scene_number: str, y_baseline: float) -> None:
+    c.setFont(FONT_NAME, FONT_SIZE)
+    left_label = str(scene_number)
+    right_label = str(scene_number)
+
+    c.drawString(X_SCENE_NUM_LEFT, y_baseline, left_label)
+    right_w = stringWidth(right_label, FONT_NAME, FONT_SIZE)
+    c.drawString(X_SCENE_NUM_RIGHT - right_w, y_baseline, right_label)
 
 
 def render_pdf(paragraphs: Iterable[Paragraph], out_pdf: Path) -> None:
@@ -237,7 +223,6 @@ def render_pdf(paragraphs: Iterable[Paragraph], out_pdf: Path) -> None:
         wrapped = wrap_paragraph_text(text, max_w, FONT_NAME, FONT_SIZE)
         needed_h = max(1, len(wrapped)) * LINE_HEIGHT + PARA_SPACING
 
-        # Page-break before rendering block, preserving structure order.
         if y - needed_h < BOTTOM_MARGIN:
             c.showPage()
             page_num += 1
@@ -245,12 +230,17 @@ def render_pdf(paragraphs: Iterable[Paragraph], out_pdf: Path) -> None:
             c.setFont(FONT_NAME, FONT_SIZE)
             y = PAGE_H - TOP_MARGIN
 
+        first_line_y = y - FONT_SIZE
+
+        # Scene numbers are printed on both sides of the scene heading line
+        if p.ptype == "scene heading" and p.scene_number:
+            draw_scene_numbers(c, p.scene_number, first_line_y)
+
         for line in wrapped:
             draw_y = y - FONT_SIZE
             if align_right:
                 lw = stringWidth(line, FONT_NAME, FONT_SIZE)
-                rx = RIGHT_TEXT_EDGE - lw
-                c.drawString(rx, draw_y, line)
+                c.drawString(RIGHT_TEXT_EDGE - lw, draw_y, line)
             else:
                 c.drawString(x, draw_y, line)
             y -= LINE_HEIGHT

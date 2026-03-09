@@ -47,5 +47,6 @@ python fdx_to_pdf.py sample.fdx sample.pdf
 ## Notes
 
 - Scene headings, character names, transitions, and shots are uppercased for screenplay convention.
+- Scene numbers (`Paragraph Number`) are rendered on both left and right for scene headings.
 - Paragraph order is preserved exactly as parsed from FDX.
 - The converter performs block-level page breaking to avoid splitting/reordering elements.
