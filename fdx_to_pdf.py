@@ -54,6 +54,7 @@ class Paragraph:
     ptype: str
     text: str
     scene_number: Optional[str] = None
+    alignment: Optional[str] = None
 
 
 def normalize_type(raw_type: Optional[str]) -> str:
@@ -69,13 +70,17 @@ def normalize_type(raw_type: Optional[str]) -> str:
         "shot": "shot",
         "general": "general",
         "lyrics": "dialogue",
+        "page break": "page break",
+        "pagebreak": "page break",
     }
     return mapping.get(t, t)
 
 
 def collect_text(paragraph_el: ET.Element) -> str:
     chunks: List[str] = []
-    for text_el in paragraph_el.findall("Text"):
+
+    # Use recursive search to avoid missing nested text runs.
+    for text_el in paragraph_el.iter("Text"):
         chunks.append(text_el.text or "")
 
     if not chunks:
@@ -102,6 +107,7 @@ def parse_fdx(path: Path) -> List[Paragraph]:
                 ptype=normalize_type(p.attrib.get("Type")),
                 text=collect_text(p) or "",
                 scene_number=p.attrib.get("Number"),
+                alignment=(p.attrib.get("Alignment") or "").strip().lower() or None,
             )
         )
 
@@ -184,6 +190,10 @@ def paragraph_style(p: Paragraph):
     if t == "shot":
         return LEFT_MARGIN, PAGE_W - LEFT_MARGIN - RIGHT_MARGIN, lambda s: s.upper(), False
 
+    # Honor explicit right-aligned paragraphs from FDX attributes when present.
+    if p.alignment == "right":
+        return LEFT_MARGIN, PAGE_W - LEFT_MARGIN - RIGHT_MARGIN, identity, True
+
     return LEFT_MARGIN, PAGE_W - LEFT_MARGIN - RIGHT_MARGIN, identity, False
 
 
@@ -217,6 +227,14 @@ def render_pdf(paragraphs: Iterable[Paragraph], out_pdf: Path) -> None:
     y = PAGE_H - TOP_MARGIN
 
     for p in paragraphs:
+        if p.ptype == "page break":
+            c.showPage()
+            page_num += 1
+            draw_page_number(c, page_num)
+            c.setFont(FONT_NAME, FONT_SIZE)
+            y = PAGE_H - TOP_MARGIN
+            continue
+
         x, max_w, transform, align_right = paragraph_style(p)
         text = transform(p.text or "")
 
