@@ -1,0 +1,18 @@
+:root {
+  --bg:#0c1222; --card:#121b31; --text:#e8eefc; --muted:#9fb1d6; --line:#2a3860; --accent:#5ca7ff;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,sans-serif;background:linear-gradient(180deg,#0a1020,#0c1222);color:var(--text)}
+.wrap{max-width:860px;margin:0 auto;padding:24px}
+h1{margin:6px 0 0}
+.sub{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
+.upload{display:inline-block;border:1px dashed var(--line);padding:12px 14px;border-radius:10px;cursor:pointer;margin-bottom:12px}
+.upload input{display:none}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:.9rem}
+input{background:#0d152b;border:1px solid var(--line);border-radius:10px;padding:10px;color:var(--text)}
+button{margin-top:12px;background:var(--accent);border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+#status{color:var(--muted);min-height:22px}
+pre{white-space:pre-wrap;background:#0d152b;padding:12px;border:1px solid var(--line);border-radius:10px;max-height:320px;overflow:auto}
+@media (max-width:700px){.row{grid-template-columns:1fr}}

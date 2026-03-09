@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FDX → PDF Converter</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <h1>FDX → PDF Converter</h1>
+    <p class="sub">Upload a Final Draft <code>.fdx</code> file and export a readable screenplay PDF.</p>
+
+    <section class="card">
+      <label class="upload">
+        <input id="fdxFile" type="file" accept=".fdx,application/xml,text/xml" />
+        <span>Choose .fdx file</span>
+      </label>
+
+      <div class="row">
+        <label>Title
+          <input id="title" placeholder="My Screenplay" />
+        </label>
+        <label>Author
+          <input id="author" placeholder="Your Name" />
+        </label>
+      </div>
+
+      <button id="convertBtn">Convert to PDF</button>
+      <p id="status"></p>
+    </section>
+
+    <section class="card" id="previewCard">
+      <h2>Preview</h2>
+      <pre id="preview">No file loaded yet.</pre>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
